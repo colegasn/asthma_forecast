@@ -1,5 +1,5 @@
-##### Asthma Forecasting Algorithms #####
-### Last Update: 1/8/2025
+##### Asthma Forecasting Algorithms - Daily Admissions #####
+### Last Update: 1/14/2025
 
 # Load packages
 library(readxl)
@@ -418,70 +418,72 @@ p <- 0.05
 
 # Get number of admissions that meet or exceed the risk threshold
 arima.top <- asthma_predict |>
-  arrange(desc(arima.yhat_upper)) |>
-  top_frac(n=p) |>
-  select(ds, y, arima.yhat, arima.yhat_upper)
+  filter(Method=="ARIMA") |>
+  slice_max(order_by=Predict, prop=p)
 ets.top <- asthma_predict |>
-  arrange(desc(ets.yhat_upper)) |>
-  top_frac(n=p) |>
-  select(ds, y, ets.yhat, ets.yhat_upper)
+  filter(Method=="ETS") |>
+  slice_max(order_by=Predict, prop=p)
 prophet.top <- asthma_predict |>
-  arrange(desc(prophet.yhat_upper)) |>
-  top_frac(n=p) |>
-  select(ds, y, prophet.yhat, prophet.yhat_upper)
+  filter(Method=="Prophet") |>
+  slice_max(order_by=Predict, prop=p)
+actual.top <- asthma_predict |>
+  filter(Method=="ARIMA") |>
+  slice_max(order_by=y, prop=p)
 
 # Set benchmark to classify HIGH admission days
-arima.thres <- min(arima.top$arima.yhat_upper, na.rm=TRUE)
-ets.thres <- min(ets.top$ets.yhat_upper, na.rm=TRUE)
-prophet.thres <- min(prophet.top$prophet.yhat_upper, na.rm=TRUE)
-actual.thres <- 5
+arima.thres <- min(arima.top$Predict, na.rm=TRUE)
+ets.thres <- min(ets.top$Predict, na.rm=TRUE)
+prophet.thres <- min(prophet.top$Predict, na.rm=TRUE)
+actual.thres <- min(actual.top$y, na.rm=TRUE)
 
 arima.thres
 ets.thres
 prophet.thres
+actual.thres
 
 # Classify whether the day was HIGH or NORMAL
 asthma_status <- asthma_predict |>
-  mutate(arima.status = ifelse(arima.yhat_upper > arima.thres, "HIGH", "NORMAL"),
-         ets.status = ifelse(ets.yhat_upper > ets.thres, "HIGH", "NORMAL"),
-         prophet.status = ifelse(prophet.yhat_upper > prophet.thres, "HIGH", "NORMAL"),
-         actual.status = ifelse(y > actual.thres, "HIGH", "NORMAL")) |>
-  select(ds, y, arima.yhat_upper, ets.yhat_upper, prophet.yhat_upper, arima.status, ets.status, prophet.status, actual.status)
+  mutate(arima.high = ifelse(Method=="ARIMA" & Predict > arima.thres, 1, 0),
+         ets.high = ifelse(Method=="ETS" & Predict > ets.thres, 1, 0),
+         prophet.high = ifelse(Method=="Prophet" & Predict > prophet.thres, 1, 0),
+         actual.high = ifelse(y > actual.thres, 1, 0)) |>
+  select(ds, y, actual.high, Method, Predict, arima.high, ets.high, prophet.high)
 asthma_status
 
-### Proportion of days where actual hospitalizations were HIGH
+### Proportion of weeks where actual hospitalizations were HIGH
 # Actual
 asthma_status |>
-  count(actual.status) |>
+  filter(Method=="ARIMA") |>
+  count(actual.high) |>
   mutate(pct=n/sum(n))
 
 # ARIMA
 asthma_status |>
-  count(arima.status, actual.status) |>
-  arrange(actual.status)
+  count(arima.high, actual.high) |>
+  arrange(actual.high)
 
 # ETS
 asthma_status |>
-  count(ets.status, actual.status) |>
-  arrange(actual.status)
+  count(ets.high, actual.high) |>
+  arrange(actual.high)
 
 # Prophet
 asthma_status |>
-  count(prophet.status, actual.status) |>
-  arrange(actual.status)
+  count(prophet.high, actual.high) |>
+  arrange(actual.high)
 
 # Compare outcomes
 asthma_status |>
-  count(arima.status, ets.status, prophet.status, actual.status) |>
+  count(arima.high, ets.high, prophet.high, actual.high) |>
   mutate(pct=n/sum(n)) |>
-  relocate(actual.status) |>
+  relocate(actual.high) |>
   arrange(desc(n))
 
 # Calculate misclassifications
 asthma.c <- asthma_status %>%
-  mutate(arima.c=ifelse(actual.status==arima.status, "CORRECT", "INCORRECT"),
-         ets.c=ifelse(actual.status==ets.status, "CORRECT", "INCORRECT"),
-         prophet.c=ifelse(actual.status==prophet.status, "CORRECT", "INCORRECT"))
+  mutate(arima.c=ifelse(actual.high==arima.high, "CORRECT", "INCORRECT"),
+         ets.c=ifelse(actual.high==ets.high, "CORRECT", "INCORRECT"),
+         prophet.c=ifelse(actual.high==prophet.high, "CORRECT", "INCORRECT"))
 asthma.c %>%
   count(arima.c, ets.c, prophet.c)
 
@@ -503,36 +505,36 @@ asthma.c %>%
 
 ### PPV
 # ARIMA
-true.pos <- sum(asthma_status$arima.status=="HIGH" & asthma_status$actual.status=="HIGH")
-pos <- sum(asthma_status$arima.status=="HIGH")
+true.pos <- sum(asthma_status$arima.high==1 & asthma_status$actual.high==1)
+pos <- sum(asthma_status$arima.high==1)
 arima.ppv <- true.pos/pos
 
 # ETS
-true.pos <- sum(asthma_status$ets.status=="HIGH" & asthma_status$actual.status=="HIGH")
-pos <- sum(asthma_status$ets.status=="HIGH")
+true.pos <- sum(asthma_status$ets.high==1 & asthma_status$actual.high==1)
+pos <- sum(asthma_status$ets.high==1)
 ets.ppv <- true.pos/pos
 
 # Prophet
-true.pos <- sum(asthma_status$prophet.status=="HIGH" & asthma_status$actual.status=="HIGH")
-pos <- sum(asthma_status$prophet.status=="HIGH")
+true.pos <- sum(asthma_status$prophet.high==1 & asthma_status$actual.high==1)
+pos <- sum(asthma_status$prophet.high==1)
 prophet.ppv <- true.pos/pos
 
 c(ARIMA=arima.ppv, ETS=ets.ppv, Prophet=prophet.ppv)
 
 ### NPV
 # ARIMA
-true.neg <- sum(asthma_status$arima.status=="NORMAL" & asthma_status$actual.status=="NORMAL")
-neg <- sum(asthma_status$arima.status=="NORMAL")
+true.neg <- sum(asthma_status$arima.high==0 & asthma_status$actual.high==0)
+neg <- sum(asthma_status$arima.high==0)
 arima.npv <- true.neg/neg
 
 # ETS
-true.neg <- sum(asthma_status$ets.status=="NORMAL" & asthma_status$actual.status=="NORMAL")
-neg <- sum(asthma_status$ets.status=="NORMAL")
+true.neg <- sum(asthma_status$ets.high==0 & asthma_status$actual.high==0)
+neg <- sum(asthma_status$ets.high==0)
 ets.npv <- true.neg/neg
 
 # Prophet
-true.neg <- sum(asthma_status$prophet.status=="NORMAL" & asthma_status$actual.status=="NORMAL")
-neg <- sum(asthma_status$prophet.status=="NORMAL")
+true.neg <- sum(asthma_status$prophet.high==0 & asthma_status$actual.high==0)
+neg <- sum(asthma_status$prophet.high==0)
 prophet.npv <- true.neg/neg
 
 c(ARIMA=arima.npv, ETS=ets.npv, Prophet=prophet.npv)
@@ -543,8 +545,11 @@ c(ARIMA=arima.npv, ETS=ets.npv, Prophet=prophet.npv)
 ### ARIMA
 
 # Fit ROC curve
-arima.roc <- roc(response=asthma_status$actual.status,
-                 predictor=asthma_status$arima.yhat_upper)
+arima.roc <- asthma_status |>
+  filter(Method=="ARIMA") |>
+  roc(response=actual.high, predictor=Predict)
+
+# Pull sensitivity and specificity for different cutoffs
 arima_roc.stat <- data.frame(Sensitivity=arima.roc$sensitivities,
                              Specificity=arima.roc$specificities,
                              Cutoffs=arima.roc$thresholds) %>%
@@ -565,8 +570,11 @@ plot.roc(arima.roc, col="red", lwd=2.5, print.thres=TRUE,
 ### ETS
 
 # Fit ROC curve
-ets.roc <- roc(response=asthma_status$actual.status,
-               predictor=asthma_status$ets.yhat_upper)
+ets.roc <- asthma_status |>
+  filter(Method=="ETS") |>
+  roc(response=actual.high, predictor=Predict)
+
+# Pull sensitivity and specificity for different cutoffs
 ets_roc.stat <- data.frame(Sensitivity=ets.roc$sensitivities,
                            Specificity=ets.roc$specificities,
                            Cutoffs=ets.roc$thresholds) %>%
@@ -585,8 +593,12 @@ plot.roc(ets.roc, col="red", lwd=2.5, print.thres=TRUE,
          main="ROC from ETS(A,N,A) (HIGH=5)")
 
 ### Prophet
-prophet.roc <- roc(response=asthma_status$actual.status,
-                 predictor=asthma_status$prophet.yhat_upper)
+# Fit ROC curve
+prophet.roc <- asthma_status |>
+  filter(Method=="Prophet") |>
+  roc(response=actual.high, predictor=Predict)
+
+# Pull sensitivity and specificity for different cutoffs
 prophet_roc.stat <- data.frame(Sensitivity=prophet.roc$sensitivities,
                              Specificity=prophet.roc$specificities,
                              Cutoffs=prophet.roc$thresholds) %>%

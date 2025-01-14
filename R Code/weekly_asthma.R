@@ -406,9 +406,9 @@ actual.thres
 
 # Classify whether the day was HIGH or NORMAL
 asthma_status <- asthma_predict |>
-  mutate(arima.high = ifelse(Method=="ARIMA" & Upper > arima.thres, 1, 0),
-         ets.high = ifelse(Method=="ETS" & Upper > ets.thres, 1, 0),
-         prophet.high = ifelse(Method=="Prophet" & Upper > prophet.thres, 1, 0),
+  mutate(arima.high = ifelse(Method=="ARIMA" & Predict > arima.thres, 1, 0),
+         ets.high = ifelse(Method=="ETS" & Predict > ets.thres, 1, 0),
+         prophet.high = ifelse(Method=="Prophet" & Predict > prophet.thres, 1, 0),
          actual.high = ifelse(y > actual.thres, 1, 0)) |>
   select(ds, y, actual.high, Method, Predict, arima.high, ets.high, prophet.high)
 asthma_status
