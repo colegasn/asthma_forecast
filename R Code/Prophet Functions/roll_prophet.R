@@ -11,9 +11,6 @@ roll_prophet <- function(ts_data, start_date="2022-01-01", iter=1, timeframe=365
   
   #####
   
-  # Identify latest date
-  start_date <- as.Date(start_date)
-  
   # Check that the roll_date is later than earliest time point
   if(start_date < min(ts_data$ds)){
     stop("Roll date specified is before the earliest time point in the series.")

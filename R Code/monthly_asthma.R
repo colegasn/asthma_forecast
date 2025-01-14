@@ -1,4 +1,4 @@
-##### Asthma Forecasting Algorithms - Weekly Admissions #####
+##### Asthma Forecasting Algorithms - Monthly Admissions #####
 ### Last Update: 1/14/2025
 
 # Load packages
@@ -28,25 +28,25 @@ asthma <- read_excel("C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/data-raw/as
   relocate(WeekDate, .after=MonthDate)
 print(asthma, n=15)
 
-# All weekly asthma admissions
+# All monthly asthma admissions
 asthma_ts <- asthma |>
-  group_by(WeekDate) |>
+  group_by(MonthDate) |>
   summarise(y=sum(AllAdmissions)) |>
-  mutate(ds=ymd(WeekDate)) |>
+  mutate(ds=ymd(MonthDate)) |>
   dplyr::select(ds, y) |>
   as_tsibble(index = ds)
 print(asthma_ts, n=15)
 
 #####
 
-# Distribution of weeks with admissions: 1/1/2016 to 12/31/2023 (n~417 weeks)
+# Distribution of months with admissions: 1/1/2016 to 12/31/2023 (n=96 weeks)
 asthma_ts |>
   as_tibble() |>
   tidyr::drop_na(y) |>
   summarise(Min=min(y), Q1=quantile(y, probs=0.25), Med=median(y),
             Q3=quantile(y, probs=0.75), max=max(y), IQR=Q3-Q1)
 
-# Plot the time series for weekly admissions
+# Plot the time series for monthly admissions
 asthma_ts |>
   autoplot(y, color="#00b5d1", lwd=0.8)+
   theme_bw()+
@@ -60,23 +60,28 @@ asthma_ts |>
         panel.grid.minor = element_blank())+
   xlab("Time")+
   ylab("Count")+
-  ggtitle("Weekly Hospitalizations of Patients Admitted for Asthma",
+  ggtitle("Monthly Hospitalizations of Patients Admitted for Asthma",
           subtitle="Jan 1, 2016 - December 31, 2023")
 
 # Distribution of the number of admissions by week
-asthma_n_wk <- asthma |>
-  group_by(WEEK_NAME) |>
+asthma_n_mth <- asthma |>
+  group_by(MONTH_NAME) |>
   summarise(Sum=sum(AllAdmissions))
-asthma_n_wk
+asthma_n_mth
 
 # Barplot of number of admissions per day of the week
-ggplot(asthma_n_wk |>
-        mutate(Sum.adj=Sum-600), aes(x=WEEK_NAME, y=Sum.adj))+
-  geom_bar(stat="identity", width = 0.7, color="black", fill=c("grey40", rep("grey85",5), "grey40"))+
+ggplot(asthma_n_mth |>
+        mutate(Sum.adj=Sum-200,
+               MONTH_NAME=factor(MONTH_NAME,
+                                 levels = c("January","February","March","April",
+                                 "May","June","July","August","September",
+                                 "October","November","December"))),
+       aes(x=MONTH_NAME, y=Sum.adj))+
+  geom_bar(stat="identity", width = 0.7, color="black", fill=rep("grey85",12))+
   geom_text(aes(label=Sum), vjust=-0.4, size=6)+
   theme_bw()+
-  scale_x_discrete(name="Hospitalizations By Day of the Week")+
-  scale_y_continuous(limits = c(0,400))+
+  scale_x_discrete(name="Hospitalizations By Month")+
+  scale_y_continuous(limits = c(0,700))+
   theme(panel.grid = element_blank(),
         axis.title.y = element_blank(),
         axis.text.y = element_blank(),
@@ -85,17 +90,23 @@ ggplot(asthma_n_wk |>
         axis.text.x = element_text(size=16),
         plot.title = element_text(size=20),
         plot.subtitle = element_text(size=14))+
-  ggtitle("Weekly Asthma Hospitalizations",
+  ggtitle("Monthly Asthma Hospitalizations",
           subtitle = "January 1, 2016 - December 31, 2023")
 
 
 # 1. ARIMA ----------------------------------------------------------------
 
+# Format date column to 'yearmonth' 
+asthma_ts <- asthma_ts |>
+  mutate(ds=yearmonth(ds)) |>
+  as_tsibble(index=ds)
+asthma_ts
+
 # Split into train and test data
 asthma_train <- asthma_ts |>
-  filter(ds<"2022-01-01")
+  filter(ds<yearmonth("2022 Jan"))
 asthma_test <- asthma_ts |>
-  filter(ds>="2022-01-01")
+  filter(ds>=yearmonth("2022 Jan"))
 
 
 # 1.1 ARIMA Model Formulation ---------------------------------------------
@@ -114,27 +125,26 @@ asthma_train |>
 
 # Fit ARIMA models
 asthma_mdl <- asthma_train |>
-  model(arima200100=ARIMA(y ~ 1+pdq(2,0,0)+PDQ(1,0,0)),
-        arima300001=ARIMA(y ~ 1+pdq(3,0,0)+PDQ(0,0,1)),
+  model(arima001201=ARIMA(y ~ 1+pdq(0,0,1)+PDQ(2,0,1)),
+        arima001101=ARIMA(y ~ 1+pdq(0,0,1)+PDQ(1,0,1)),
         arima100=ARIMA(y ~ 1+pdq(1,0,0)),
-        arima200=ARIMA(y ~ 1+pdq(2,0,0)),
-        arima300=ARIMA(y ~ 1+pdq(3,0,0)),
+        arima001=ARIMA(y ~ 1+pdq(2,0,0)),
         search=ARIMA(y, stepwise = FALSE))
 asthma_mdl
 glance(asthma_mdl)
 
 # Examine residuals
 asthma_mdl |>
-  select(arima200) |>
+  select(arima001201) |>
   gg_tsresiduals()
 
 # Test if residuals follows a white noise process
 augment(asthma_mdl) |>
-  filter(.model == "arima200") |>
-  features(.innov, ljung_box, lag = 36, dof = 2)
+  filter(.model == "arima001201") |>
+  features(.innov, ljung_box, lag = 36, dof = 4)
 
 # Report the values of the best ARIMA model
-report(asthma_mdl |> select(arima200))
+report(asthma_mdl |> select(arima001201))
 
 
 # 1.2 ARIMA Prediction ----------------------------------------------------
@@ -144,19 +154,13 @@ source("R Code/ARIMA Functions/arima_fit.R")
 source("R Code/ARIMA Functions/roll_arima.R")
 
 # Test the prediction function
-test <- arima_fit(ts_data = asthma_train, lookahead = 7, p=2, d=0, q=0, P=0, D=0, Q=0)
-print(test, n=7)
-
-# Test the rolling prediction function
-test2 <- roll_arima(ts_data = asthma_ts, start_date = "2022-01-03", iter = 7,
-                    timeframe = 52, p=2, d=0, q=0, P=0, D=0, Q=0, ci.level = 0.90)
-print(test2, n=7)
-
-#####
+test <- arima_fit(ts_data = asthma_train, lookahead = 24, p=0, d=0, q=1, P=2, D=0, Q=1)
+print(test, n=24)
 
 # Forecast admissions for 2022 and 2023 through rolling prediction
-future_ts <- roll_arima(ts_data = asthma_ts, start_date = "2022-01-03", iter = nrow(asthma_test),
-                        timeframe = 52, p=2, d=0, q=0, P=0, D=0, Q=0, ci.level = 0.90)
+future_ts <- roll_arima(ts_data = asthma_ts, start_date = yearmonth("2022 Jan"), iter = 24,
+                        timeframe = 12*6, p=0, d=0, q=1, P=2, D=0, Q=1, ci.level = 0.90)
+print(future_ts, n=24)
 
 # Merge with observed admissions
 arima_predict <- inner_join(asthma_ts, future_ts, by="ds") |>
@@ -164,11 +168,11 @@ arima_predict <- inner_join(asthma_ts, future_ts, by="ds") |>
 arima_predict
 
 # Save the predictions
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Weekly Predictions/"
-# saveRDS(arima_predict, paste(dir, "weekly_arima_predict.rds", sep=""))
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Monthly Predictions/"
+saveRDS(arima_predict, paste(dir, "monthly_arima_predict.rds", sep=""))
 
 # Read back in rolling predictions
-arima_predict <- readRDS(paste(dir, "weekly_arima_predict.rds", sep="")) |>
+arima_predict <- readRDS(paste(dir, "monthly_arima_predict.rds", sep="")) |>
   tsibble(index=ds)
 
 
@@ -176,9 +180,9 @@ arima_predict <- readRDS(paste(dir, "weekly_arima_predict.rds", sep="")) |>
 
 # Split into train and test data
 asthma_train <- asthma_ts |>
-  filter(ds<"2022-01-01")
+  filter(ds<yearmonth("2022 Jan"))
 asthma_test <- asthma_ts |>
-  filter(ds>="2022-01-01")
+  filter(ds>=yearmonth("2022 Jan"))
 
 
 # 2.1 ETS Model Formulation -----------------------------------------------
@@ -198,11 +202,11 @@ asthma_mdl |>
   forecast(h = nrow(asthma_test)) |>
   accuracy(asthma_test)
 
-# Estimated parameters of ANN model
-ana_mdl <- asthma_train |>
+# Estimated parameters of MNM model
+mnm_mdl <- asthma_train |>
   mutate(y=replace_na(y, 0)) |>
-  model(ana = ETS(y ~ error("A")+trend("N")+season("N")))
-report(ana_mdl)
+  model(ana = ETS(y ~ error("M")+trend("N")+season("M")))
+report(mnm_mdl)
 
 
 # 2.2 ETS Prediction ------------------------------------------------------
@@ -212,19 +216,13 @@ source("R Code/ETS Functions/ets_fit.R")
 source("R Code/ETS Functions/roll_ets.R")
 
 # Test the prediction function
-test <- ets_fit(ts_data = asthma_train, lookahead = 7, Error = "A", Trend = "N", Season = "N")
-print(test, n=7)
-
-# Test the rolling prediction function 
-test2 <- roll_ets(ts_data = asthma_ts, start_date = "2022-01-03", iter = 7, 
-                  timeframe = 52, Error = "A", Trend = "N", Season = "N", ci.level = 0.90)
-print(test, n=7)
-
-#####
+test <- ets_fit(ts_data = asthma_train, lookahead = 24, Error = "M", Trend = "N", Season = "M")
+print(test, n=24)
 
 # Forecast admissions for 2022 and 2023 through rolling prediction
-future_ts <- roll_ets(ts_data = asthma_ts, start_date = "2022-01-03", iter = nrow(asthma_test), 
-                      timeframe = 52, Error = "A", Trend = "N", Season = "N", ci.level = 0.90)
+future_ts <- roll_ets(ts_data = asthma_ts, start_date = yearmonth("2022 Jan"), iter = 24, 
+                      timeframe = 12*6, Error = "M", Trend = "N", Season = "M", ci.level = 0.90)
+print(future_ts, n=24)
 
 # Merge with observed admissions
 ets_predict <- inner_join(asthma_ts, future_ts, by="ds") |>
@@ -232,73 +230,77 @@ ets_predict <- inner_join(asthma_ts, future_ts, by="ds") |>
 ets_predict
 
 # Save the predictions
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Weekly Predictions/"
-# saveRDS(ets_predict, paste(dir, "weekly_ets_predict.rds", sep=""))
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Monthly Predictions/"
+saveRDS(ets_predict, paste(dir, "monthly_ets_predict.rds", sep=""))
 
 # Read back in rolling predictions
-ets_predict <- readRDS(paste(dir, "weekly_ets_predict.rds", sep="")) |>
+ets_predict <- readRDS(paste(dir, "monthly_ets_predict.rds", sep="")) |>
   tsibble(index=ds)
 
 
 # 3. Prophet --------------------------------------------------------------
 
+# Format 'ds' column to 'ymd' format
+asthma_ts <- asthma |>
+  group_by(MonthDate) |>
+  summarise(y=sum(AllAdmissions)) |>
+  mutate(ds=ymd(MonthDate)) |>
+  dplyr::select(ds, y) |>
+  as_tsibble(index = ds)
+print(asthma_ts, n=15)
+
 # Split into train and test data
 asthma_train <- asthma_ts |>
-  filter(ds<"2022-01-01")
+  filter(ds<ymd("2022-01-01"))
 asthma_test <- asthma_ts |>
-  filter(ds>="2022-01-01")
+  filter(ds>=ymd("2022-01-01"))
 
 # Load in functions to do rolling predictions
 source("R Code/Prophet Functions/prophet_fit.R")
 source("R Code/Prophet Functions/roll_prophet.R")
 
 # Test the prediction function
-test <- prophet_fit(ts_data = asthma_train, lookahead = 7)
+test <- prophet_fit(ts_data = asthma_train, lookahead = 24)
 print(test, n=7)
 
-# Test the rolling prediction function
-test2 <- roll_prophet(ts_data = asthma_ts, start_date = "2022-01-03", iter = 7, 
-                      timeframe = 52, ci.level = 0.90)
-print(test2, n=7)
-
-#####
-
 # Forecast admissions for 2022 and 2023 through rolling prediction
-future_ts <- roll_prophet(ts_data = asthma_ts, start_date = "2022-01-03", iter = nrow(asthma_test),
-                          timeframe = 52, ci.level = 0.90)|>
-  mutate(ds=ymd(ds-1))
+future_ts <- roll_prophet(ts_data = asthma_ts, start_date = "2022-01-01", iter = nrow(asthma_test),
+                          timeframe = 12*6, ci.level = 0.90) |>
+  mutate(ds=yearmonth(ds)+1)
+print(future_ts, n=24)
 
 # Merge with observed admissions
 prophet_predict <- inner_join(asthma_ts, future_ts, by="ds") |>
+  mutate(ds=yearmonth(ds)) |>
   select(ds, y, Method, Predict, Lower, Upper)
 prophet_predict
 
 # Save the predictions
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Weekly Predictions/"
-# saveRDS(prophet_predict, paste(dir, "weekly_prophet_predict.rds", sep=""))
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Monthly Predictions/"
+# saveRDS(prophet_predict, paste(dir, "monthly_prophet_predict.rds", sep=""))
 
 # Read back in rolling predictions
-prophet_predict <- readRDS(paste(dir, "weekly_prophet_predict.rds", sep="")) |>
+prophet_predict <- readRDS(paste(dir, "monthly_prophet_predict.rds", sep="")) |>
   tsibble(index=ds)
 
 
 # 4. Compilation ----------------------------------------------------------
 
 # Directory where predictions are saved
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Weekly Predictions/"
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Monthly Predictions/"
 
 # Predictions from ARIMA model
-arima_predict <- readRDS(paste(dir, "weekly_arima_predict.rds", sep="")) |>
+arima_predict <- readRDS(paste(dir, "monthly_arima_predict.rds", sep="")) |>
   tsibble(index=ds) |>
   fill_gaps()
 
 # Predictions from ETS model
-ets_predict <- readRDS(paste(dir, "weekly_ets_predict.rds", sep="")) |>
+ets_predict <- readRDS(paste(dir, "monthly_ets_predict.rds", sep="")) |>
   tsibble(index=ds) |>
   fill_gaps()
 
 # Predictions from Prophet model
-prophet_predict <- readRDS(paste(dir, "weekly_prophet_predict.rds", sep="")) |>
+prophet_predict <- readRDS(paste(dir, "monthly_prophet_predict.rds", sep="")) |>
   tsibble(index=ds) |>
   fill_gaps()
 
@@ -369,7 +371,8 @@ asthma_cover
 # Coverage scorecard
 cover_summary <- asthma_cover |>
   group_by(Method) |>
-  count(Cover) |>
+  mutate(Cover=factor(Cover)) |>
+  count(Cover, .drop = FALSE) |>
   mutate(Prop=n/sum(n))
 print(cover_summary, n=63)
 
