@@ -1,5 +1,5 @@
 ##### Asthma Forecasting Algorithms - Daily Admissions #####
-### Last Update: 1/14/2025
+### Last Update: 1/21/2025
 
 # Load packages
 library(readxl)
@@ -12,6 +12,8 @@ library(fable)
 library(feasts)
 library(ggplot2)
 library(pROC)
+library(tidyr)
+
 
 # Load Data ---------------------------------------------------------------
 
@@ -344,7 +346,38 @@ asthma_predict <- bind_rows(as_tibble(arima_predict), as_tibble(ets_predict), as
 asthma_predict
 
 
-# 5. Summary Statistics ---------------------------------------------------
+# 5. Analysis -------------------------------------------------------------
+
+# Plot the time series predictions with actual observations
+plot_predict <- asthma_predict |>
+  ggplot(aes(x=ds))+
+  facet_grid(Method~.)+
+  geom_ribbon(aes(ymin=Lower, ymax=Upper, group=Method, fill=Method), alpha=0.3)+
+  geom_line(aes(y=y), lwd=0.5, lty="solid", color="grey10", alpha=0.6)+
+  geom_line(aes(y=Predict, color=Method), lwd=0.6, lty="solid")+
+  scale_color_manual(values=c("red3","gold3","blue3"))+
+  scale_fill_manual(values=c("red","gold","blue"))+
+  scale_x_date(name="Date", date_breaks = "1 months", date_labels = "%b %Y",
+               limits = c(as.Date("2022-01-01"), as.Date("2023-12-31")),
+               expand = c(0,0))+
+  scale_y_continuous(name="Hospitalizations", breaks = 0:14)+
+  theme_bw()+
+  theme(panel.grid.minor.y = element_blank(),
+        panel.border = element_rect(fill = "transparent", color="black", linewidth = 0.7),
+        panel.background = element_rect(fill = "white"),
+        panel.spacing.x = unit(0, 'points'),
+        strip.background.x = element_rect(fill="grey30", color="black", linewidth=1),
+        strip.background.y = element_rect(fill="black", color="black", linewidth=1),
+        strip.text.x = element_text(size=11, color = "white", face="bold"),
+        strip.text.y = element_text(size=12, color= "white", face="bold"),
+        axis.text.x = element_text(size=10, angle=45, colour="black",
+                                   vjust=1, hjust=1),
+        plot.title = element_text(size=16, color="black"),
+        legend.position = "none")+
+    ggtitle("Daily Asthma Hospitalization Forecast",
+          subtitle = "Observed with Prediction + 90% Confidence Interval")
+plot_predict
+
 
 ### Absolute Error
 
