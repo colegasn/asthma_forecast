@@ -1,5 +1,5 @@
 ##### AQI ANALYSIS ON ASTHMA FORECASTING MODELS #####
-### Last Update: 1/21/2025
+### Last Update: 1/24/2025
 
 # Load packages
 library(readxl)
@@ -224,7 +224,7 @@ arima_aqi <- inner_join(asthma_ts, future_ts, by="ds") |>
 arima_aqi
 
 # Save the predictions
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/AQI Predictions/"
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/AQI Predictions/"
 # saveRDS(arima_aqi, paste(dir, "arima_aqi.rds", sep=""))
 
 # Read back in rolling predictions
@@ -293,7 +293,7 @@ ets_aqi <- inner_join(asthma_ts, future_ts, by="ds") |>
 ets_aqi
 
 # Save the predictions
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/AQI Predictions/"
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/AQI Predictions/"
 # saveRDS(ets_aqi, paste(dir, "ets_aqi.rds", sep=""))
 
 # Read back in rolling predictions
@@ -334,7 +334,7 @@ prophet_aqi <- inner_join(asthma_ts, future_ts, by="ds") |>
 prophet_aqi
 
 # Save the predictions
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/AQI Predictions/"
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/AQI Predictions/"
 # saveRDS(prophet_aqi, paste(dir, "prophet_aqi.rds", sep=""))
 
 # Read back in rolling predictions
@@ -342,10 +342,10 @@ prophet_aqi <- readRDS(paste(dir, "prophet_aqi.rds", sep="")) |>
   tsibble(index=ds)
 
 
-# 5. Compilation ----------------------------------------------------------
-# AQI Predictions
+# 5. Ensemble -------------------------------------------------------------
+
 # Directory where predictions are saved
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/AQI Predictions/"
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/AQI Predictions/"
 
 # Predictions from ARIMA model
 arima_aqi <- readRDS(paste(dir, "arima_aqi.rds", sep="")) |>
@@ -363,50 +363,67 @@ prophet_aqi <- readRDS(paste(dir, "prophet_aqi.rds", sep="")) |>
   fill_gaps()
 
 # Merge into one dataframe
-aqi_predict <- bind_rows(as_tibble(arima_aqi), as_tibble(ets_aqi), as_tibble(prophet_aqi))
+merge_aqi <- bind_rows(as_tibble(arima_aqi), as_tibble(ets_aqi), as_tibble(prophet_aqi))
+merge_aqi
+
+# Ensemble model - average prediction of the three model classes
+ensemble_aqi <- merge_aqi |>
+  group_by(ds) |>
+  summarise(Predict_mean=mean(Predict),
+            Lower_mean=mean(Lower),
+            Upper_mean=mean(Upper)) |>
+  mutate(Method="Ensemble") |>
+  rename(Predict=Predict_mean, Lower=Lower_mean, Upper=Upper_mean) |>
+  inner_join(merge_aqi |> filter(Method=="ARIMA") |> dplyr::select(ds, AQI), by="ds") |>
+  relocate(ds, AQI, Method, Predict, Lower, Upper)
+ensemble_aqi
+
+# Merge into one dataframe
+aqi_predict <- bind_rows(as_tibble(merge_aqi), as_tibble(ensemble_aqi))
+aqi_predict
+
+# Save the predictions
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/AQI Predictions/"
+# saveRDS(aqi_predict, paste(dir, "aqi_predict.rds", sep=""))
+
+
+# 6. Compilation ----------------------------------------------------------
+# AQI Predictions
+# Directory where predictions are saved
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/AQI Predictions/"
+
+# Read in the daily rolling predictions
+aqi_predict <- readRDS(paste(dir, "aqi_predict.rds", sep=""))
 aqi_predict
 
 #####
+
 # Asthma Predictions
 # Directory where predictions are saved
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Daily Predictions/"
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/Daily Predictions/"
 
-# Predictions from ARIMA model
-arima_predict <- readRDS(paste(dir, "daily_arima_predict.rds", sep="")) |>
-  tsibble(index=ds) |>
-  fill_gaps()
-
-# Predictions from ETS model
-ets_predict <- readRDS(paste(dir, "daily_ets_predict.rds", sep="")) |>
-  tsibble(index=ds) |>
-  fill_gaps()
-
-# Predictions from Prophet model
-prophet_predict <- readRDS(paste(dir, "daily_prophet_predict.rds", sep="")) |>
-  tsibble(index=ds) |>
-  fill_gaps()
-
-# Merge into one dataframe and get residuals
-asthma_predict <- bind_rows(as_tibble(arima_predict), as_tibble(ets_predict), as_tibble(prophet_predict)) |>
+# Read in the daily rolling predictions
+asthma_predict <- readRDS(paste(dir, "daily_predict.rds", sep="")) |>
   mutate(Residual=y-Predict)
 asthma_predict
 
 
-# 6. Residuals of Asthma Admissions ---------------------------------------
+# 7. Residuals of Asthma Admissions ---------------------------------------
 
 # Plot the time series predictions with actual observations
 plot_predict <- aqi_predict |>
+  mutate(Method=factor(Method, levels = c("ARIMA","ETS","Prophet","Ensemble"))) |>
   ggplot(aes(x=ds))+
   facet_grid(Method~.)+
   geom_ribbon(aes(ymin=Lower, ymax=Upper, group=Method, fill=Method), alpha=0.3)+
   geom_line(aes(y=AQI), lwd=0.5, lty="solid", color="grey10", alpha=0.6)+
   geom_line(aes(y=Predict, color=Method), lwd=0.6, lty="solid")+
-  scale_color_manual(values=c("red3","gold3","blue3"))+
-  scale_fill_manual(values=c("red","gold","blue"))+
+  scale_color_manual(values=c("red3","green3","blue3","gold3"))+
+  scale_fill_manual(values=c("red","green","blue","gold"))+
   scale_x_date(name="Date", date_breaks = "1 months", date_labels = "%b %Y",
                limits = c(as.Date("2022-01-01"), as.Date("2023-12-31")),
                expand = c(0,0))+
-  scale_y_continuous(name="AQI", breaks = 0:14)+
+  scale_y_continuous(name="AQI", breaks = seq(0,200,by=40))+
   theme_bw()+
   theme(panel.grid.minor.y = element_blank(),
         panel.border = element_rect(fill = "transparent", color="black", linewidth = 0.7),
@@ -426,6 +443,7 @@ plot_predict
 
 # Residual plot of future asthma admissions
 residual.plot <- asthma_predict |>
+  mutate(Method=factor(Method, levels = c("ARIMA","ETS","Prophet","Ensemble"))) |>
   ggplot(aes(x=ds, y=Residual))+
   facet_grid(~Method)+
   geom_line(color="black", lwd=0.4)+
@@ -460,6 +478,7 @@ asthma_aqi
 
 # Plot residuals of asthma admissions against AQI predictions
 residual_predict.plot <- asthma_aqi |>
+  mutate(Method=factor(Method, levels = c("ARIMA","ETS","Prophet","Ensemble"))) |>
   ggplot(aes(x=Predict_AQI, y=Residual))+
   facet_grid(~Method)+
   geom_point(color="black", size=1.1)+
@@ -485,12 +504,15 @@ asthma_aqi.ets <- asthma_aqi |>
   filter(Method=="ETS")
 asthma_aqi.prophet <- asthma_aqi |>
   filter(Method=="Prophet")
+asthma_aqi.ensemble <- asthma_aqi |>
+  filter(Method=="Ensemble")
 
 cor.test(asthma_aqi.arima$AQI, asthma_aqi.arima$Residual, method = "kendall")
 cor.test(asthma_aqi.ets$AQI, asthma_aqi.ets$Residual, method = "kendall")
 cor.test(asthma_aqi.prophet$AQI, asthma_aqi.prophet$Residual, method = "kendall")
+cor.test(asthma_aqi.ensemble$AQI, asthma_aqi.ensemble$Residual, method = "kendall")
 
-rm(asthma_aqi.arima, asthma_aqi.ets, asthma_aqi.prophet)
+rm(asthma_aqi.arima, asthma_aqi.ets, asthma_aqi.prophet, asthma_aqi.ensemble)
 
 
 # 8. Lagged AQI Exposure --------------------------------------------------
@@ -520,6 +542,7 @@ asthma_lag.aqi
 
 # Plot residuals of asthma admissions against actual AQI observations
 residual_predict.plot <- asthma_lag.aqi |>
+  mutate(Method=factor(Method, levels = c("ARIMA","ETS","Prophet","Ensemble"))) |>
   mutate(Lag=factor(Lag, labels = c("Lag 0 AQI","Lag 1 AQI","Lag 2 AQI","Lag 3 AQI","Lag 4 AQI","Lag 5 AQI"))) |>
   ggplot(aes(x=AQI, y=Residual))+
   facet_grid(Method~Lag)+
@@ -604,4 +627,25 @@ prophet_lag5 <- asthma_lag.aqi |>
   filter(Method=="Prophet" & Lag=="5")
 cor.test(prophet_lag5$AQI, prophet_lag5$Residual, method = "kendall")
 rm(prophet_lag0, prophet_lag1, prophet_lag2, prophet_lag3, prophet_lag4, prophet_lag5)
+
+# Correlation test between predicted AQI and residuals from Ensemble models
+ensemble_lag0 <- asthma_lag.aqi |>
+  filter(Method=="Ensemble" & Lag=="0")
+cor.test(ensemble_lag0$AQI, ensemble_lag0$Residual, method = "kendall")
+ensemble_lag1 <- asthma_lag.aqi |>
+  filter(Method=="Ensemble" & Lag=="1")
+cor.test(ensemble_lag1$AQI, ensemble_lag1$Residual, method = "kendall")
+ensemble_lag2 <- asthma_lag.aqi |>
+  filter(Method=="Ensemble" & Lag=="2")
+cor.test(ensemble_lag2$AQI, ensemble_lag2$Residual, method = "kendall")
+ensemble_lag3 <- asthma_lag.aqi |>
+  filter(Method=="Ensemble" & Lag=="3")
+cor.test(ensemble_lag3$AQI, ensemble_lag3$Residual, method = "kendall")
+ensemble_lag4 <- asthma_lag.aqi |>
+  filter(Method=="Ensemble" & Lag=="4")
+cor.test(ensemble_lag4$AQI, ensemble_lag4$Residual, method = "kendall")
+ensemble_lag5 <- asthma_lag.aqi |>
+  filter(Method=="Ensemble" & Lag=="5")
+cor.test(ensemble_lag5$AQI, ensemble_lag5$Residual, method = "kendall")
+rm(ensemble_lag0, ensemble_lag1, ensemble_lag2, ensemble_lag3, ensemble_lag4, ensemble_lag5)
 

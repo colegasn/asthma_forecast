@@ -1,5 +1,5 @@
 ##### Analyzing Lookback Windows in Rolling Predictions #####
-### Last Update: 1/10/2025
+### Last Update: 1/24/2025
 
 # Load packages
 library(readxl)
@@ -96,7 +96,7 @@ while(i<=length(yrs)){
 # 2. Compilation ----------------------------------------------------------
 
 # File path to read in predictions
-filepath <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Window Predictions/"
+filepath <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/Window Predictions/"
 
 # Read in rolling predictions for ARIMA, ETS, and Prophet
 yrs <- c("2022","2021-2022","2020-2022","2019-2022","2018-2022","2017-2022","2016-2022")
@@ -130,7 +130,43 @@ while(i<=length(yrs)){
 }
 
 # Combine into one data frame
-asthma_predict <- bind_rows(arima_predict, ets_predict, prophet_predict)
+merge_predict <- bind_rows(arima_predict, ets_predict, prophet_predict)
+merge_predict
+
+
+# 4. Ensemble -------------------------------------------------------------
+
+merge_predict |>
+  filter(ds==ymd("2023-01-01") & Train=="2016-2022") |>
+  summarise(Predict_mean=mean(Predict),
+            Lower_mean=mean(Lower),
+            Upper_mean=mean(Upper)) |>
+  mutate(Method="Ensemble")
+
+# Ensemble model - average prediction of the three model classes
+ensemble_predict <- merge_predict |>
+  group_by(ds, Train) |>
+  summarise(Predict_mean=mean(Predict),
+            Lower_mean=mean(Lower),
+            Upper_mean=mean(Upper)) |>
+  mutate(Method="Ensemble") |>
+  rename(Predict=Predict_mean, Lower=Lower_mean, Upper=Upper_mean) |>
+  inner_join(merge_predict |> filter(Method=="ARIMA" & Train=="2022") |> dplyr::select(ds, y), by="ds") |>
+  relocate(ds, y, Method, Predict, Lower, Upper)
+ensemble_predict
+
+# Merge into one dataframe
+asthma_predict <- bind_rows(as_tibble(merge_predict), as_tibble(ensemble_predict)) |>
+  arrange(ds, Train)
+print(asthma_predict, n=100)
+
+# Save the predictions
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/Window Predictions/"
+# saveRDS(asthma_predict, paste(dir, "window_predict.rds", sep=""))
+
+# Read in the predictions with varying lookback windows
+asthma_predict <- readRDS(paste(dir, "window_predict.rds", sep="")) |>
+  mutate(Method=factor(Method, levels = c("ARIMA","ETS","Prophet","Ensemble")))
 asthma_predict
 
 
@@ -152,7 +188,7 @@ error_summary
 # Sort by window
 error_summary|>
   arrange(Train, Method) |>
-  print(n=21)
+  print(n=28)
 
 
 ### Absolute Percentage Error
@@ -167,12 +203,12 @@ pcterror_summary <- asthma_pcterror |>
   group_by(Method, Train) |>
   summarise(Min=min(PctError), Q1=quantile(PctError, p=0.25, names=F), Median=median(PctError),
             Q3=quantile(PctError, p=0.75, names=F), Max=max(PctError), IQR=Q3-Q1)
-print(pcterror_summary, n=21)
+print(pcterror_summary, n=28)
 
 # Sort by window
 pcterror_summary|>
   arrange(Train, Method) |>
-  print(n=21)
+  print(n=28)
 
 
 ### Mean Squared Error
@@ -192,18 +228,18 @@ print(sqerror_summary, n=21)
 # Sort by window
 sqerror_summary |>
   arrange(Train, Method) |>
-  print(n=21)
+  print(n=28)
 
 # Get mean squared error
 mse_summary <- asthma_sqerror |>
   group_by(Method, Train) |>
   summarise(MSE=sum(SqError))
-print(mse_summary, n=21)
+print(mse_summary, n=28)
 
 # Sort MSE by window
 mse_summary |>
   arrange(Train, Method) |>
-  print(n=21)
+  print(n=28)
 
 
 ### Coverage
@@ -220,7 +256,7 @@ cover_summary <- asthma_cover |>
   group_by(Method,Train) |>
   count(Cover) |>
   mutate(Prop=n/sum(n))
-print(cover_summary, n=63)
+print(cover_summary, n=83)
 
 # ARIMA
 cover_summary |>
@@ -237,39 +273,44 @@ cover_summary |>
   filter(Method=="Prophet") |>
   print(n=21)
 
+# Ensemble
+cover_summary |>
+  filter(Method=="Ensemble") |>
+  print(n=21)
+
 ###
 
 # 2022
 cover_summary |>
   filter(Train=="2022") |>
-  print(n=9)
+  print(n=12)
 
 # 2021-22
 cover_summary |>
   filter(Train=="2021-2022") |>
-  print(n=9)
+  print(n=12)
 
 # 2020-22
 cover_summary |>
   filter(Train=="2020-2022") |>
-  print(n=9)
+  print(n=12)
 
 # 2019-22
 cover_summary |>
   filter(Train=="2019-2022") |>
-  print(n=9)
+  print(n=12)
 
 # 2018-22
 cover_summary |>
   filter(Train=="2018-2022") |>
-  print(n=9)
+  print(n=12)
 
 # 2017-22
 cover_summary |>
   filter(Train=="2017-2022") |>
-  print(n=9)
+  print(n=12)
 
 # 2016-22
 cover_summary |>
   filter(Train=="2016-2022") |>
-  print(n=9)
+  print(n=12)

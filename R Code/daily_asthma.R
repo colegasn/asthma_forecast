@@ -1,5 +1,5 @@
 ##### Asthma Forecasting Algorithms - Daily Admissions #####
-### Last Update: 1/21/2025
+### Last Update: 1/24/2025
 
 # Load packages
 library(readxl)
@@ -207,7 +207,7 @@ arima_predict <- inner_join(asthma_ts, future_ts, by="ds") |>
 arima_predict
 
 # Save the predictions
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Daily Predictions/"
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/Daily Predictions/"
 # saveRDS(arima_predict, paste(dir, "daily_arima_predict.rds", sep=""))
 
 # Read back in rolling predictions
@@ -274,7 +274,7 @@ ets_predict <- inner_join(asthma_ts, future_ts, by="ds") |>
 ets_predict
 
 # Save the predictions
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Daily Predictions/"
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/Daily Predictions/"
 # saveRDS(ets_predict, paste(dir, "daily_ets_predict.rds", sep=""))
 
 # Read back in rolling predictions
@@ -313,7 +313,7 @@ prophet_predict <- inner_join(asthma_ts, future_ts, by="ds") |>
 prophet_predict
 
 # Save the predictions
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Daily Predictions/"
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/Daily Predictions/"
 # saveRDS(prophet_predict, paste(dir, "daily_prophet_predict.rds", sep=""))
 
 # Read back in rolling predictions
@@ -321,10 +321,10 @@ prophet_predict <- readRDS(paste(dir, "daily_prophet_predict.rds", sep="")) |>
   tsibble(index=ds)
 
 
-# 4. Compilation ----------------------------------------------------------
+# 4. Ensemble -------------------------------------------------------------
 
 # Directory where predictions are saved
-dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Daily Predictions/"
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/Daily Predictions/"
 
 # Predictions from ARIMA model
 arima_predict <- readRDS(paste(dir, "daily_arima_predict.rds", sep="")) |>
@@ -342,21 +342,52 @@ prophet_predict <- readRDS(paste(dir, "daily_prophet_predict.rds", sep="")) |>
   fill_gaps()
 
 # Merge into one dataframe
-asthma_predict <- bind_rows(as_tibble(arima_predict), as_tibble(ets_predict), as_tibble(prophet_predict))
+merge_predict <- bind_rows(as_tibble(arima_predict), as_tibble(ets_predict), as_tibble(prophet_predict))
+merge_predict
+
+# Ensemble model - average prediction of the three model classes
+ensemble_predict <- merge_predict |>
+  group_by(ds) |>
+  summarise(Predict_mean=mean(Predict),
+            Lower_mean=mean(Lower),
+            Upper_mean=mean(Upper)) |>
+  mutate(Method="Ensemble") |>
+  rename(Predict=Predict_mean, Lower=Lower_mean, Upper=Upper_mean) |>
+  inner_join(merge_predict |> filter(Method=="ARIMA") |> dplyr::select(ds, y), by="ds") |>
+  relocate(ds, y, Method, Predict, Lower, Upper)
+ensemble_predict
+
+# Merge into one dataframe
+asthma_predict <- bind_rows(as_tibble(merge_predict), as_tibble(ensemble_predict))
+asthma_predict
+
+# Save the predictions
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/Daily Predictions/"
+# saveRDS(asthma_predict, paste(dir, "daily_predict.rds", sep=""))
+
+
+# 5. Compilation ----------------------------------------------------------
+
+# Directory where predictions are saved
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/Daily Predictions/"
+
+# Read in the daily rolling predictions
+asthma_predict <- readRDS(paste(dir, "daily_predict.rds", sep=""))
 asthma_predict
 
 
-# 5. Analysis -------------------------------------------------------------
+# 6. Analysis -------------------------------------------------------------
 
 # Plot the time series predictions with actual observations
 plot_predict <- asthma_predict |>
+  mutate(Method=factor(Method, levels = c("ARIMA","ETS","Prophet","Ensemble"))) |>
   ggplot(aes(x=ds))+
   facet_grid(Method~.)+
   geom_ribbon(aes(ymin=Lower, ymax=Upper, group=Method, fill=Method), alpha=0.3)+
   geom_line(aes(y=y), lwd=0.5, lty="solid", color="grey10", alpha=0.6)+
   geom_line(aes(y=Predict, color=Method), lwd=0.6, lty="solid")+
-  scale_color_manual(values=c("red3","gold3","blue3"))+
-  scale_fill_manual(values=c("red","gold","blue"))+
+  scale_color_manual(values=c("red3","green3","blue3","gold3"))+
+  scale_fill_manual(values=c("red","green","blue", "gold"))+
   scale_x_date(name="Date", date_breaks = "1 months", date_labels = "%b %Y",
                limits = c(as.Date("2022-01-01"), as.Date("2023-12-31")),
                expand = c(0,0))+
@@ -400,7 +431,7 @@ asthma_pcterror <- asthma_predict |>
   mutate(PctError=abs(y - Predict)/Predict)
 asthma_pcterror
 
-# 5-number summary and IQR of median absolute percentage error
+# 5-number summary and IQR of absolute percentage error
 pcterror_summary <- asthma_pcterror |>
   group_by(Method) |>
   summarise(Min=min(PctError), Q1=quantile(PctError, p=0.25, names=F), Median=median(PctError),
@@ -444,7 +475,7 @@ cover_summary <- asthma_cover |>
 print(cover_summary, n=63)
 
 
-# 6. Thresholds -----------------------------------------------------------
+# 7. Thresholds -----------------------------------------------------------
 
 # Set risk threshold
 p <- 0.05
@@ -459,6 +490,9 @@ ets.top <- asthma_predict |>
 prophet.top <- asthma_predict |>
   filter(Method=="Prophet") |>
   slice_max(order_by=Predict, prop=p)
+ensemble.top <- asthma_predict |>
+  filter(Method=="Ensemble") |>
+  slice_max(order_by=Predict, prop=p)
 actual.top <- asthma_predict |>
   filter(Method=="ARIMA") |>
   slice_max(order_by=y, prop=p)
@@ -467,11 +501,13 @@ actual.top <- asthma_predict |>
 arima.thres <- min(arima.top$Predict, na.rm=TRUE)
 ets.thres <- min(ets.top$Predict, na.rm=TRUE)
 prophet.thres <- min(prophet.top$Predict, na.rm=TRUE)
+ensemble.thres <- min(ensemble.top$Predict, na.rm=TRUE)
 actual.thres <- min(actual.top$y, na.rm=TRUE)
 
 arima.thres
 ets.thres
 prophet.thres
+ensemble.thres
 actual.thres
 
 # Classify whether the day was HIGH or NORMAL
@@ -479,8 +515,9 @@ asthma_status <- asthma_predict |>
   mutate(arima.high = ifelse(Method=="ARIMA" & Predict > arima.thres, 1, 0),
          ets.high = ifelse(Method=="ETS" & Predict > ets.thres, 1, 0),
          prophet.high = ifelse(Method=="Prophet" & Predict > prophet.thres, 1, 0),
-         actual.high = ifelse(y > actual.thres, 1, 0)) |>
-  select(ds, y, actual.high, Method, Predict, arima.high, ets.high, prophet.high)
+         ensemble.high = ifelse(Method=="Ensemble" & Predict > ensemble.thres, 1, 0),
+         actual.high = ifelse(y >= actual.thres, 1, 0)) |>
+  select(ds, y, actual.high, Method, Predict, arima.high, ets.high, prophet.high, ensemble.high)
 asthma_status
 
 ### Proportion of weeks where actual hospitalizations were HIGH
@@ -505,9 +542,14 @@ asthma_status |>
   count(prophet.high, actual.high) |>
   arrange(actual.high)
 
+# Ensemble
+asthma_status |>
+  count(ensemble.high, actual.high) |>
+  arrange(actual.high)
+
 # Compare outcomes
 asthma_status |>
-  count(arima.high, ets.high, prophet.high, actual.high) |>
+  count(arima.high, ets.high, prophet.high, ensemble.high, actual.high) |>
   mutate(pct=n/sum(n)) |>
   relocate(actual.high) |>
   arrange(desc(n))
@@ -516,24 +558,30 @@ asthma_status |>
 asthma.c <- asthma_status %>%
   mutate(arima.c=ifelse(actual.high==arima.high, "CORRECT", "INCORRECT"),
          ets.c=ifelse(actual.high==ets.high, "CORRECT", "INCORRECT"),
-         prophet.c=ifelse(actual.high==prophet.high, "CORRECT", "INCORRECT"))
-asthma.c %>%
-  count(arima.c, ets.c, prophet.c)
+         prophet.c=ifelse(actual.high==prophet.high, "CORRECT", "INCORRECT"),
+         ensemble.c=ifelse(actual.high==ensemble.high, "CORRECT", "INCORRECT"))
+asthma.c |>
+  count(arima.c, ets.c, prophet.c, ensemble.c)
 
 #### Misclassification rates
 # ARIMA
-asthma.c %>%
-  count(arima.c) %>%
+asthma.c |>
+  count(arima.c) |>
   mutate(pct=n/sum(n))
 
 # ETS
-asthma.c %>%
-  count(ets.c) %>%
+asthma.c |>
+  count(ets.c) |>
   mutate(pct=n/sum(n))
 
 # Prophet
-asthma.c %>%
-  count(prophet.c) %>%
+asthma.c |>
+  count(prophet.c) |>
+  mutate(pct=n/sum(n))
+
+# Ensemble
+asthma.c |>
+  count(ensemble.c) |>
   mutate(pct=n/sum(n))
 
 ### PPV
@@ -552,7 +600,12 @@ true.pos <- sum(asthma_status$prophet.high==1 & asthma_status$actual.high==1)
 pos <- sum(asthma_status$prophet.high==1)
 prophet.ppv <- true.pos/pos
 
-c(ARIMA=arima.ppv, ETS=ets.ppv, Prophet=prophet.ppv)
+# Ensemble
+true.pos <- sum(asthma_status$ensemble.high==1 & asthma_status$actual.high==1)
+pos <- sum(asthma_status$ensemble.high==1)
+ensemble.ppv <- true.pos/pos
+
+c(ARIMA=arima.ppv, ETS=ets.ppv, Prophet=prophet.ppv, Ensemble=ensemble.ppv)
 
 ### NPV
 # ARIMA
@@ -570,10 +623,15 @@ true.neg <- sum(asthma_status$prophet.high==0 & asthma_status$actual.high==0)
 neg <- sum(asthma_status$prophet.high==0)
 prophet.npv <- true.neg/neg
 
-c(ARIMA=arima.npv, ETS=ets.npv, Prophet=prophet.npv)
+# Ensemble
+true.neg <- sum(asthma_status$ensemble.high==0 & asthma_status$actual.high==0)
+neg <- sum(asthma_status$ensemble.high==0)
+ensemble.npv <- true.neg/neg
+
+c(ARIMA=arima.npv, ETS=ets.npv, Prophet=prophet.npv, Ensemble=ensemble.npv)
 
 
-# 7. ROC Curve Analysis ---------------------------------------------------
+# 8. ROC Curve Analysis ---------------------------------------------------
 
 ### ARIMA
 
@@ -585,20 +643,20 @@ arima.roc <- asthma_status |>
 # Pull sensitivity and specificity for different cutoffs
 arima_roc.stat <- data.frame(Sensitivity=arima.roc$sensitivities,
                              Specificity=arima.roc$specificities,
-                             Cutoffs=arima.roc$thresholds) %>%
-  mutate(DistSquared=(Sensitivity-1)^2+(Specificity-1)^2) %>%
+                             Cutoffs=arima.roc$thresholds) |>
+  mutate(DistSquared=(Sensitivity-1)^2+(Specificity-1)^2) |>
   tibble()
 
 # Which row has the smallest distance?
 arima_roc.stat %>%
   slice_min(DistSquared)
 
-# Plot the ROC curve for the 3-months prediction
+# Plot the ROC curve
 plot.roc(arima.roc, col="red", lwd=2.5, print.thres=TRUE,
          identity=TRUE, identity.lwd=1.5,
          identity.lty="dashed", identity.col="black",
          print.auc=TRUE, auc.polygon = TRUE, 
-         main="ROC from ARIMA(0,1,2)(1,0,2)[7] (HIGH=5)")
+         main="ROC from ARIMA(0,1,2)(1,0,2)[7] (HIGH=6)")
 
 ### ETS
 
@@ -610,20 +668,20 @@ ets.roc <- asthma_status |>
 # Pull sensitivity and specificity for different cutoffs
 ets_roc.stat <- data.frame(Sensitivity=ets.roc$sensitivities,
                            Specificity=ets.roc$specificities,
-                           Cutoffs=ets.roc$thresholds) %>%
-  mutate(DistSquared=(Sensitivity-1)^2+(Specificity-1)^2) %>%
+                           Cutoffs=ets.roc$thresholds) |>
+  mutate(DistSquared=(Sensitivity-1)^2+(Specificity-1)^2) |>
   tibble()
 
 # Which row has the smallest distance?
 ets_roc.stat %>%
   slice_min(DistSquared)
 
-# Plot the ROC curve for the 3-months prediction
+# Plot the ROC curve
 plot.roc(ets.roc, col="red", lwd=2.5, print.thres=TRUE,
          identity=TRUE, identity.lwd=1.5,
          identity.lty="dashed", identity.col="black",
          print.auc=TRUE, auc.polygon = TRUE, 
-         main="ROC from ETS(A,N,A) (HIGH=5)")
+         main="ROC from ETS(A,N,A) (HIGH=6)")
 
 ### Prophet
 # Fit ROC curve
@@ -634,20 +692,45 @@ prophet.roc <- asthma_status |>
 # Pull sensitivity and specificity for different cutoffs
 prophet_roc.stat <- data.frame(Sensitivity=prophet.roc$sensitivities,
                              Specificity=prophet.roc$specificities,
-                             Cutoffs=prophet.roc$thresholds) %>%
-  mutate(DistSquared=(Sensitivity-1)^2+(Specificity-1)^2) %>%
+                             Cutoffs=prophet.roc$thresholds) |>
+  mutate(DistSquared=(Sensitivity-1)^2+(Specificity-1)^2) |>
   tibble()
 
 # Which row has the smallest distance?
 prophet_roc.stat %>%
   slice_min(DistSquared)
 
-# Plot the ROC curve for the 3-months prediction
+# Plot the ROC curve
 plot.roc(prophet.roc, col="red", lwd=2.5, print.thres=TRUE,
          identity=TRUE, identity.lwd=1.5,
          identity.lty="dashed", identity.col="black",
          print.auc=TRUE, auc.polygon = TRUE, 
-         main="ROC from Prophet (HIGH=5)")
+         main="ROC from Prophet (HIGH=6)")
+
+### Ensemble
+
+# Fit ROC curve
+ensemble.roc <- asthma_status |>
+  filter(Method=="Ensemble") |>
+  roc(response=actual.high, predictor=Predict)
+
+# Pull sensitivity and specificity for different cutoffs
+ensemble_roc.stat <- data.frame(Sensitivity=ensemble.roc$sensitivities,
+                                Specificity=ensemble.roc$specificities,
+                                Cutoffs=ensemble.roc$thresholds) |>
+  mutate(DistSquared=(Sensitivity-1)^2+(Specificity-1)^2) |>
+  tibble()
+
+# Which row has the smallest distance?
+ensemble_roc.stat |>
+  slice_min(DistSquared)
+
+# Plot the ROC curve
+plot.roc(ensemble.roc, col="red", lwd=2.5, print.thres=TRUE,
+         identity=TRUE, identity.lwd=1.5,
+         identity.lty="dashed", identity.col="black",
+         print.auc=TRUE, auc.polygon = TRUE, 
+         main="ROC from Ensemble Model (HIGH=6)")
 
 
 ### Print AUC and 95% CI and SE
@@ -662,3 +745,7 @@ ci.auc(ets.roc)
 # Prophet
 prophet.roc$auc
 ci.auc(prophet.roc)
+
+# Ensemble
+ensemble.roc$auc
+ci.auc(ensemble.roc)
