@@ -1,5 +1,5 @@
 ##### Analyzing Lookback Windows in Rolling Predictions #####
-### Last Update: 1/28/2025
+### Last Update: 1/29/2025
 
 # Load packages
 library(readxl)
@@ -317,3 +317,213 @@ cover_summary |>
 cover_summary |>
   filter(Train=="2016-2022") |>
   print(n=12)
+
+
+# 4. Thresholds -----------------------------------------------------------
+
+#####
+# Calculate absolute percentage error stats, coverage, and the ROC curve analysis
+yrs <- c("2022","2021-2022","2020-2022","2019-2022","2018-2022","2017-2022","2016-2022")
+vld <- rep("2023",length(yrs))
+mtd <- c("ARIMA","ETS","Prophet","Ensemble")
+i <- 1
+while(i<=length(yrs)){
+  
+  # Filter by Train years
+  asthma_Train <- asthma_predict |>
+    filter(Train==yrs[i])
+  
+  #####
+  
+  # Calculate absolute percentage error
+  asthma.pcterror <- asthma_Train |>
+    mutate(PctError=abs(y - Predict)/Predict*100) |>
+    group_by(Method) |>
+    summarise(Min=min(PctError), Q1=quantile(PctError, p=0.25, names=F), Median=median(PctError),
+              Q3=quantile(PctError, p=0.75, names=F), Max=max(PctError), IQR=Q3-Q1, Mean=mean(PctError)) |>
+    mutate(Train=yrs[i], Valid=vld[i]) |>
+    select(Method, Train, Valid, Mean, Median, IQR)
+  
+  # Coverage
+  asthma.cover <- asthma_Train |>
+    mutate(Cover=ifelse(y>Lower & y<=Upper, "COVER",
+                        ifelse(y<Lower, "TOO_HIGH",
+                               ifelse(y>Upper, "TOO_LOW",NA)))) |>
+    group_by(Method) |>
+    count(Cover, .drop = FALSE) |>
+    mutate(Train=yrs[i], Valid=vld[i], Prop=n/sum(n)) |>
+    select(Method, Train, Valid, Cover, n, Prop)
+  
+  #####
+  
+  # Set risk threshold
+  p <- 0.05
+  
+  # Get number of admissions that meet or exceed the risk threshold
+  arima.top <- asthma_Train |>
+    filter(Method=="ARIMA") |>
+    slice_max(order_by=Predict, prop=p)
+  ets.top <- asthma_Train |>
+    filter(Method=="ETS") |>
+    slice_max(order_by=Predict, prop=p)
+  prophet.top <- asthma_Train |>
+    filter(Method=="Prophet") |>
+    slice_max(order_by=Predict, prop=p)
+  ensemble.top <- asthma_Train |>
+    filter(Method=="Ensemble") |>
+    slice_max(order_by=Predict, prop=p)
+  actual.top <- asthma_Train |>
+    filter(Method=="ARIMA") |>
+    slice_max(order_by=y, prop=p)
+  
+  # Set benchmark to classify HIGH admission days
+  arima.thres <- min(arima.top$Predict, na.rm=TRUE)
+  ets.thres <- min(ets.top$Predict, na.rm=TRUE)
+  prophet.thres <- min(prophet.top$Predict, na.rm=TRUE)
+  ensemble.thres <- min(ensemble.top$Predict, na.rm=TRUE)
+  actual.thres <- min(actual.top$y, na.rm=TRUE)
+  
+  # Classify whether the day was HIGH or NORMAL
+  asthma_status <- asthma_Train |>
+    mutate(Thres=ifelse(Method=="ARIMA", arima.thres,
+                        ifelse(Method=="ETS", ets.thres,
+                               ifelse(Method=="Prophet", prophet.thres,
+                                      ifelse(Method=="Ensemble", ensemble.thres, NA))))) |>
+    mutate(model.high = ifelse(Predict >= Thres, 1, 0),
+           actual.high = ifelse(y >= actual.thres, 1, 0)) |>
+    mutate(Method=factor(Method, levels = c("ARIMA","ETS","Prophet","Ensemble")),
+           Train=yrs[i], Valid=vld[i]) |>
+    select(ds, y, actual.high, Method, Train, Valid, Predict, Thres, model.high)
+  
+  # Actual HIGH days
+  asthma.act <- asthma_status |>
+    filter(Method=="ARIMA") |>
+    count(actual.high) |>
+    mutate(pct=n/sum(n)) |>
+    mutate(Valid=vld[i]) |>
+    select(Valid, actual.high, n, pct)
+  
+  # Classification by model
+  asthma.c <- asthma_status |>
+    group_by(Method) |>
+    count(model.high, actual.high) |>
+    mutate(Train=yrs[i], Valid=vld[i]) |>
+    relocate(Train, .after=Method) |>
+    relocate(Valid, .after=Train) |>
+    arrange(Method, Train, desc(actual.high), desc(model.high))
+  
+  # Calculate misclassification rate
+  asthma.miss <- asthma_status |>
+    mutate(miss=ifelse(actual.high==model.high, "CORRECT", "INCORRECT")) |>
+    group_by(Method) |>
+    count(miss) |>
+    mutate(miss.rate=n/730) |>
+    mutate(Train=yrs[i], Valid=vld[i]) |>
+    relocate(Train, .after=Method) |>
+    relocate(Valid, .after=Train)
+  
+  # PPV and NPV
+  asthma.ppv_npv <- asthma_status |>
+    group_by(Method) |>
+    summarise(true.pos=sum(ifelse(model.high==1 & actual.high==1, 1, 0)),
+              pos=sum(ifelse(model.high==1, 1, 0)),
+              true.neg=sum(ifelse(model.high==0 & actual.high==0, 1, 0)),
+              neg=sum(ifelse(model.high==0, 1, 0))) |>
+    mutate(ppv=true.pos/pos,
+           npv=true.neg/neg) |>
+    mutate(Train=yrs[i], Valid=vld[i]) |>
+    relocate(Train, .after=Method) |>
+    relocate(Valid, .after=Train)
+  
+  #####
+  
+  # ROC curve analysis for all models
+  j <- 1
+  while(j<=length(mtd)){
+    # Fit ROC curve
+    asthma.roc <- asthma_status |>
+      filter(Method==mtd[j]) |>
+      roc(response=actual.high, predictor=Predict)
+    
+    # Pull sensitivity and specificity for different cutoffs
+    roc.stat <- data.frame(Sensitivity=asthma.roc$sensitivities,
+                                 Specificity=asthma.roc$specificities,
+                                 Cutoffs=asthma.roc$thresholds) |>
+      mutate(DistSquared=(Sensitivity-1)^2+(Specificity-1)^2) |>
+      tibble()
+    
+    # Which row has the smallest distance?
+    asthma.roc_stat <- roc.stat |>
+      slice_min(DistSquared)
+    
+    # Calculate AUC + 95% CI
+    asthma.roc_stat$AUC <- as.double(asthma.roc$auc)
+    asthma.roc_stat$AUC_Lower <- ci.auc(asthma.roc)[1]
+    asthma.roc_stat$AUC_Upper <- ci.auc(asthma.roc)[3]
+    
+    # Format
+    asthma.roc_stat <- asthma.roc_stat |>
+      mutate(Method=mtd[j], Train=yrs[i], Valid=vld[i]) |>
+      select(Method, Train, Valid, Sensitivity, Specificity, AUC, AUC_Lower, AUC_Upper)
+    
+    # Combine in one data frame
+    if(j==1){
+      asthma.ROC <- asthma.roc_stat
+    } else{
+      asthma.ROC <- bind_rows(asthma.ROC, asthma.roc_stat)
+    }
+    
+    # Go to next model class
+    j <- j+1
+  }
+  
+  #####
+  
+  # Pull results into one data frame
+  if(i==1){
+    asthma_pcterror <- asthma.pcterror
+    asthma_cover <- asthma.cover
+    asthma_act <- asthma.act
+    asthma_c <- asthma.c
+    asthma_miss <- asthma.miss
+    asthma_ppv_npv <- asthma.ppv_npv
+    asthma_ROC <- asthma.ROC
+  } else{
+    asthma_pcterror <- bind_rows(asthma_pcterror, asthma.pcterror)
+    asthma_cover <- bind_rows(asthma_cover, asthma.cover)
+    asthma_act <- bind_rows(asthma_act, asthma.act)
+    asthma_c <- bind_rows(asthma_c, asthma.c)
+    asthma_miss <- bind_rows(asthma_miss, asthma.miss)
+    asthma_ppv_npv <- bind_rows(asthma_ppv_npv, asthma.ppv_npv)
+    asthma_ROC <- bind_rows(asthma_ROC, asthma.ROC)
+  }
+  
+  # Clear results from the iterations
+  rm(asthma.pcterror, asthma.cover, asthma.c, asthma.miss, asthma.ppv_npv, asthma.ROC)
+  
+  # Next lookback window
+  i <- i+1
+}
+
+#####
+
+# Absolute percentage error
+print(asthma_pcterror |> arrange(Method, Train), n=28)
+
+# 90% confidence interval coverage 
+print(asthma_cover |> arrange(Method, Train), n=83)
+
+# Actual HIGH/NORMAL classifications
+asthma.act
+
+# HIGH/NORMAL classification scorecard
+print(asthma_c |> arrange(Method, Train), n=112)
+
+# Misclassification rates
+print(asthma_miss |> arrange(Method, Train), n=56)
+
+# PPV and NPV
+print(asthma_ppv_npv |> arrange(Method, Train), n=28)
+
+# Sensitivity, specificity, AUC + 95% CI from ROC curves
+print(asthma_ROC |> arrange(Method, Train), n=28)
