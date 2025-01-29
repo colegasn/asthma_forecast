@@ -1,5 +1,5 @@
 ##### Analyzing Lookback Windows in Rolling Predictions #####
-### Last Update: 1/24/2025
+### Last Update: 1/28/2025
 
 # Load packages
 library(readxl)
@@ -172,6 +172,9 @@ asthma_predict
 
 # 3. Cross-Validation -----------------------------------------------------
 
+# Number of days in training windows
+365*7:1
+
 ### Absolute Error
 # Calculate absolute error
 asthma_error <- asthma_predict |>
@@ -195,15 +198,15 @@ error_summary|>
 
 # Calculate absolute percentage error
 asthma_pcterror <- asthma_predict |>
-  mutate(PctError=abs(y - Predict)/Predict)
+  mutate(PctError=abs(y - Predict)/Predict*100)
 asthma_pcterror
 
 # 5-number summary and IQR of median absolute percentage error
 pcterror_summary <- asthma_pcterror |>
   group_by(Method, Train) |>
   summarise(Min=min(PctError), Q1=quantile(PctError, p=0.25, names=F), Median=median(PctError),
-            Q3=quantile(PctError, p=0.75, names=F), Max=max(PctError), IQR=Q3-Q1)
-print(pcterror_summary, n=28)
+            Q3=quantile(PctError, p=0.75, names=F), Max=max(PctError), IQR=Q3-Q1, Mean=mean(PctError))
+print(pcterror_summary |> select(Train, Mean, Median, IQR), n=28)
 
 # Sort by window
 pcterror_summary|>
