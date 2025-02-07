@@ -1,5 +1,5 @@
 ##### Analyzing Lookback Windows in Rolling Predictions #####
-### Last Update: 1/29/2025
+### Last Update: 1/30/2025
 
 # Load packages
 library(readxl)
@@ -527,3 +527,9 @@ print(asthma_ppv_npv |> arrange(Method, Train), n=28)
 
 # Sensitivity, specificity, AUC + 95% CI from ROC curves
 print(asthma_ROC |> arrange(Method, Train), n=28)
+
+#####
+
+# Save results
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/"
+saveRDS(asthma_pcterror, file = paste(dir, "pcterror_table.RDS", sep=""))

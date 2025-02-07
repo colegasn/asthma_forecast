@@ -1,5 +1,5 @@
 ##### AQI ANALYSIS ON ASTHMA FORECASTING MODELS #####
-### Last Update: 1/24/2025
+### Last Update: 2/6/2025
 
 # Load packages
 library(readxl)
@@ -441,6 +441,13 @@ plot_predict <- aqi_predict |>
           subtitle = "Observed with Prediction + 90% Confidence Interval")
 plot_predict
 
+# Save plot
+savepath <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Plots/"
+ggsave(plot_predict, filename=paste(savepath, "aqi_time_series.pdf", sep=""), device=cairo_pdf,
+       width=14, height=8, units="in")
+
+#####
+
 # Residual plot of future asthma admissions
 residual.plot <- asthma_predict |>
   mutate(Method=factor(Method, levels = c("ARIMA","ETS","Prophet","Ensemble"))) |>
@@ -460,9 +467,14 @@ residual.plot <- asthma_predict |>
         strip.text = element_text(color="white", size=14, face="bold"),
         strip.background = element_rect(fill="black"),
         plot.subtitle = element_text(size=12))+
-  ggtitle("Daily Asthma Hospitalizations",
-          subtitle = "January 1, 2022 - June 30, 2023")
+  ggtitle("Asthma Prediction Residuals",
+          subtitle = "January 1, 2022 - December 31, 2023")
 residual.plot
+
+# Save plot
+savepath <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Plots/"
+ggsave(residual.plot, filename=paste(savepath, "residual_plot.pdf", sep=""), device=cairo_pdf,
+       width=14, height=8, units="in")
 
 
 # 7. Residuals of Admissions and AQI Predictions --------------------------
@@ -476,10 +488,10 @@ asthma_aqi <- inner_join(asthma_predict |>
   relocate(ds, Method)
 asthma_aqi
 
-# Plot residuals of asthma admissions against AQI predictions
+# Plot residuals of asthma admissions against AQI
 residual_predict.plot <- asthma_aqi |>
   mutate(Method=factor(Method, levels = c("ARIMA","ETS","Prophet","Ensemble"))) |>
-  ggplot(aes(x=Predict_AQI, y=Residual))+
+  ggplot(aes(x=AQI, y=Residual))+
   facet_grid(~Method)+
   geom_point(color="black", size=1.1)+
   geom_hline(yintercept=0, linetype="solid", color="purple", linewidth=1)+
@@ -493,26 +505,44 @@ residual_predict.plot <- asthma_aqi |>
         strip.text = element_text(color="white", size=14, face="bold"),
         strip.background = element_rect(fill="black"),
         plot.subtitle = element_text(size=12))+
-  ggtitle("Residuals versus Predicted AQI",
+  ggtitle("Residuals versus AQI",
           subtitle = "January 1, 2022 - December 31, 2023")
 residual_predict.plot
 
+# Save plot
+savepath <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Plots/"
+ggsave(residual.plot, filename=paste(savepath, "residual_AQI.pdf", sep=""), device=cairo_pdf,
+       width=14, height=8, units="in")
+
+#####
+
 # Correlation test between predicted AQI and residuals of asthma admissions
-asthma_aqi.arima <- asthma_aqi |>
-  filter(Method=="ARIMA")
-asthma_aqi.ets <- asthma_aqi |>
-  filter(Method=="ETS")
-asthma_aqi.prophet <- asthma_aqi |>
-  filter(Method=="Prophet")
-asthma_aqi.ensemble <- asthma_aqi |>
-  filter(Method=="Ensemble")
+mtd <- c("ARIMA","ETS","Prophet","Ensemble")
+i <- 1
+while(i<=length(mtd)){
+  # Filter predictions by model class
+  asthma_aqi.mtd <- asthma_aqi |>
+    filter(Method==mtd[i])
+  
+  # Perform correlation test
+  cor_test <- cor.test(asthma_aqi.mtd$AQI, asthma_aqi.mtd$Residual, method = "kendall")
+  
+  # Save results from the correlation test
+  if(i==1){
+    cor_result <- tibble(Method=mtd[i], tau=cor_test$estimate,
+                             Z=cor_test$statistic, p_value=cor_test$p.value)
+  } else{
+    cor_result <- bind_rows(cor_result,
+                            tibble(Method=mtd[i], tau=cor_test$estimate,
+                                       Z=cor_test$statistic, p_value=cor_test$p.value))
+  }
+  
+  # Go to next model class
+  i <- i+1
+}
 
-cor.test(asthma_aqi.arima$AQI, asthma_aqi.arima$Residual, method = "kendall")
-cor.test(asthma_aqi.ets$AQI, asthma_aqi.ets$Residual, method = "kendall")
-cor.test(asthma_aqi.prophet$AQI, asthma_aqi.prophet$Residual, method = "kendall")
-cor.test(asthma_aqi.ensemble$AQI, asthma_aqi.ensemble$Residual, method = "kendall")
-
-rm(asthma_aqi.arima, asthma_aqi.ets, asthma_aqi.prophet, asthma_aqi.ensemble)
+# Print results from correlation tests
+cor_result
 
 
 # 8. Lagged AQI Exposure --------------------------------------------------
@@ -520,12 +550,12 @@ rm(asthma_aqi.arima, asthma_aqi.ets, asthma_aqi.prophet, asthma_aqi.ensemble)
 # Create Lag 0, Lag 1, Lag 2, Lag 3, Lag 4, and Lag 5 exposures
 lag.aqi <- aqi_predict |>
   group_by(Method) |>
-  mutate(lag0_AQI=lag(Predict, n=0),
-         lag1_AQI=lag(Predict, n=1),
-         lag2_AQI=lag(Predict, n=2),
-         lag3_AQI=lag(Predict, n=3),
-         lag4_AQI=lag(Predict, n=4),
-         lag5_AQI=lag(Predict, n=5)) |>
+  mutate(lag0_AQI=lag(AQI, n=0),
+         lag1_AQI=lag(AQI, n=1),
+         lag2_AQI=lag(AQI, n=2),
+         lag3_AQI=lag(AQI, n=3),
+         lag4_AQI=lag(AQI, n=4),
+         lag5_AQI=lag(AQI, n=5)) |>
   select(-AQI, -Predict, -Lower, -Upper) |>
   relocate(ds, Method)
 lag.aqi
@@ -551,8 +581,7 @@ residual_predict.plot <- asthma_lag.aqi |>
   scale_x_continuous(name="AQI", breaks = seq(0,200,by=20))+
   scale_y_continuous(name="Residual", breaks = seq(-10,12,by=2))+
   theme_bw()+
-  theme(axis.text.x = element_text(size=10, angle=45, colour="black",
-                                   vjust=1, hjust=1),
+  theme(axis.text.x = element_text(size=10, colour="black"),
         axis.title = element_text(size=14),
         plot.title = element_text(size=16),
         strip.text = element_text(color="white", size=14, face="bold"),
@@ -563,89 +592,105 @@ residual_predict.plot <- asthma_lag.aqi |>
           subtitle = "January 1, 2022 - December 31, 2023")
 residual_predict.plot
 
+# Save plot
+savepath <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Plots/"
+ggsave(residual.predict.plot, filename=paste(savepath, "residual_lagAQI.pdf", sep=""), device=cairo_pdf,
+       width=14, height=8, units="in")
+
 #####
 
-# Correlation test between predicted AQI and residuals from ARIMA models
-arima_lag0 <- asthma_lag.aqi |>
-  filter(Method=="ARIMA" & Lag=="0")
-cor.test(arima_lag0$AQI, arima_lag0$Residual, method = "kendall")
-arima_lag1 <- asthma_lag.aqi |>
-  filter(Method=="ARIMA" & Lag=="1")
-cor.test(arima_lag1$AQI, arima_lag1$Residual, method = "kendall")
-arima_lag2 <- asthma_lag.aqi |>
-  filter(Method=="ARIMA" & Lag=="2")
-cor.test(arima_lag2$AQI, arima_lag2$Residual, method = "kendall")
-arima_lag3 <- asthma_lag.aqi |>
-  filter(Method=="ARIMA" & Lag=="3")
-cor.test(arima_lag3$AQI, arima_lag3$Residual, method = "kendall")
-arima_lag4 <- asthma_lag.aqi |>
-  filter(Method=="ARIMA" & Lag=="4")
-cor.test(arima_lag4$AQI, arima_lag4$Residual, method = "kendall")
-arima_lag5 <- asthma_lag.aqi |>
-  filter(Method=="ARIMA" & Lag=="5")
-cor.test(arima_lag5$AQI, arima_lag5$Residual, method = "kendall")
-rm(arima_lag0, arima_lag1, arima_lag2, arima_lag3, arima_lag4, arima_lag5)
+# Correlation tests on lag AQI and asthma predictions
+mtd <- c("ARIMA","ETS","Prophet","Ensemble")
+i <- 1
+while(i<=length(mtd)){
+  l <- 0
+  while(l<=5){
+    # Filter by model class for a particular lag AQI
+    mtd_lag <- asthma_lag.aqi |>
+      filter(Method==mtd[i] & Lag==l)
+    
+    # Calculate correlation test
+    cor_test <- cor.test(mtd_lag$AQI, mtd_lag$Residual, method = "kendall")
+    
+    # Save results from the correlation test
+    if(i==1 & l==0){
+      lag_cor_result <- tibble(Method=mtd[i], Lag=l, tau=cor_test$estimate,
+                               Z=cor_test$statistic, p_value=cor_test$p.value)
+    } else{
+      lag_cor_result <- bind_rows(lag_cor_result,
+                                  tibble(Method=mtd[i], Lag=l, tau=cor_test$estimate,
+                                  Z=cor_test$statistic, p_value=cor_test$p.value))
+    }
+    
+    # Go to the next AQI lag
+    l <- l+1
+  }
+  
+  # Go to the next model class
+  i <- i+1
+}
 
-# Correlation test between predicted AQI and residuals from ETS models
-ets_lag0 <- asthma_lag.aqi |>
-  filter(Method=="ETS" & Lag=="0")
-cor.test(ets_lag0$AQI, ets_lag0$Residual, method = "kendall")
-ets_lag1 <- asthma_lag.aqi |>
-  filter(Method=="ETS" & Lag=="1")
-cor.test(ets_lag1$AQI, ets_lag1$Residual, method = "kendall")
-ets_lag2 <- asthma_lag.aqi |>
-  filter(Method=="ETS" & Lag=="2")
-cor.test(ets_lag2$AQI, ets_lag2$Residual, method = "kendall")
-ets_lag3 <- asthma_lag.aqi |>
-  filter(Method=="ETS" & Lag=="3")
-cor.test(ets_lag3$AQI, ets_lag3$Residual, method = "kendall")
-ets_lag4 <- asthma_lag.aqi |>
-  filter(Method=="ETS" & Lag=="4")
-cor.test(ets_lag4$AQI, ets_lag4$Residual, method = "kendall")
-ets_lag5 <- asthma_lag.aqi |>
-  filter(Method=="ETS" & Lag=="5")
-cor.test(ets_lag5$AQI, ets_lag5$Residual, method = "kendall")
-rm(ets_lag0, ets_lag1, ets_lag2, ets_lag3, ets_lag4, ets_lag5)
+# Print the results
+lag_cor_result |>
+  arrange(Lag) |>
+  print(n=24)
 
-# Correlation test between predicted AQI and residuals from Prophet models
-prophet_lag0 <- asthma_lag.aqi |>
-  filter(Method=="Prophet" & Lag=="0")
-cor.test(prophet_lag0$AQI, prophet_lag0$Residual, method = "kendall")
-prophet_lag1 <- asthma_lag.aqi |>
-  filter(Method=="Prophet" & Lag=="1")
-cor.test(prophet_lag1$AQI, prophet_lag1$Residual, method = "kendall")
-prophet_lag2 <- asthma_lag.aqi |>
-  filter(Method=="Prophet" & Lag=="2")
-cor.test(prophet_lag2$AQI, prophet_lag2$Residual, method = "kendall")
-prophet_lag3 <- asthma_lag.aqi |>
-  filter(Method=="Prophet" & Lag=="3")
-cor.test(prophet_lag3$AQI, prophet_lag3$Residual, method = "kendall")
-prophet_lag4 <- asthma_lag.aqi |>
-  filter(Method=="Prophet" & Lag=="4")
-cor.test(prophet_lag4$AQI, prophet_lag4$Residual, method = "kendall")
-prophet_lag5 <- asthma_lag.aqi |>
-  filter(Method=="Prophet" & Lag=="5")
-cor.test(prophet_lag5$AQI, prophet_lag5$Residual, method = "kendall")
-rm(prophet_lag0, prophet_lag1, prophet_lag2, prophet_lag3, prophet_lag4, prophet_lag5)
+# P-value of correlation results
+pvalue_plot <- lag_cor_result |>
+  mutate(Method=factor(Method, levels = c("Ensemble","Prophet","ETS","ARIMA"))) |>
+  mutate(Sig=factor(ifelse(p_value>0.05, 1, 
+                           ifelse(p_value<=0.05 & p_value>0.01, 2,
+                                  ifelse(p_value<=0.01 & p_value>0.001, 3,
+                                         ifelse(p_value<=0.001 & p_value>0.0001, 4, 5)))))) |>
+  ggplot(aes(x=Lag, y=Method, fill=Sig))+
+  geom_tile()+
+  geom_text(aes(label=sprintf("%.4f", p_value)), color = "white", size=4, fontface="bold")+
+  scale_x_continuous(breaks = 0:5)+
+  scale_y_discrete(name="Model Class")+
+  scale_fill_manual(values=c("grey90","grey50","grey30","grey15","black"))+
+  theme_bw()+
+  theme(axis.title = element_text(size=12),
+        axis.text = element_text(size=12),
+        plot.title = element_text(size=16),
+        plot.subtitle = element_text(size=12),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = "none")+
+  ggtitle("P-Values of Correlations",
+          subtitle = "Lag AQI and Asthma Predictions by Model Class")
+pvalue_plot
 
-# Correlation test between predicted AQI and residuals from Ensemble models
-ensemble_lag0 <- asthma_lag.aqi |>
-  filter(Method=="Ensemble" & Lag=="0")
-cor.test(ensemble_lag0$AQI, ensemble_lag0$Residual, method = "kendall")
-ensemble_lag1 <- asthma_lag.aqi |>
-  filter(Method=="Ensemble" & Lag=="1")
-cor.test(ensemble_lag1$AQI, ensemble_lag1$Residual, method = "kendall")
-ensemble_lag2 <- asthma_lag.aqi |>
-  filter(Method=="Ensemble" & Lag=="2")
-cor.test(ensemble_lag2$AQI, ensemble_lag2$Residual, method = "kendall")
-ensemble_lag3 <- asthma_lag.aqi |>
-  filter(Method=="Ensemble" & Lag=="3")
-cor.test(ensemble_lag3$AQI, ensemble_lag3$Residual, method = "kendall")
-ensemble_lag4 <- asthma_lag.aqi |>
-  filter(Method=="Ensemble" & Lag=="4")
-cor.test(ensemble_lag4$AQI, ensemble_lag4$Residual, method = "kendall")
-ensemble_lag5 <- asthma_lag.aqi |>
-  filter(Method=="Ensemble" & Lag=="5")
-cor.test(ensemble_lag5$AQI, ensemble_lag5$Residual, method = "kendall")
-rm(ensemble_lag0, ensemble_lag1, ensemble_lag2, ensemble_lag3, ensemble_lag4, ensemble_lag5)
+# Save plot
+savepath <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Plots/"
+ggsave(pvalue_plot, filename=paste(savepath, "pvalue_plot.pdf", sep=""), device=cairo_pdf,
+       width=14, height=8, units="in")
 
+# Heat map of correlations
+cor_plot <- lag_cor_result |>
+  mutate(Method=factor(Method, levels = c("Ensemble","Prophet","ETS","ARIMA"))) |>
+  mutate(Sig=factor(ifelse(p_value>0.05, 1, 
+                           ifelse(p_value<=0.05 & p_value>0.01, 2, 3)))) |>
+  ggplot(aes(x=Lag, y=Method, fill=Sig))+
+  geom_tile()+
+  geom_text(aes(label=sprintf("%.4f", tau)), color = "white", size=4, fontface="bold")+
+  scale_x_continuous(name="AQI Lag", breaks = 0:5)+
+  scale_y_discrete(name="Model Class")+
+  scale_fill_manual(name="P-values", values=c("grey70","grey40","black"),
+                    labels=c("p > 0.05","p <= 0.05","p <= 0.01"))+
+  theme_bw()+
+  theme(axis.title = element_text(size=12),
+        axis.text = element_text(size=12),
+        axis.text.y = element_text(angle = 90, vjust = 0.5, hjust=0.5),
+        plot.title = element_text(size=16),
+        plot.subtitle = element_text(size=12),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = "bottom")+
+  ggtitle("Correlation Test of AQI and Prediction Residual",
+          subtitle = "By Model Class")
+cor_plot
+
+# Save plot
+savepath <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Plots/"
+ggsave(cor_plot, filename=paste(savepath, "cor_test.pdf", sep=""), device=cairo_pdf,
+       width=14, height=8, units="in")

@@ -1,5 +1,5 @@
 ##### Asthma Forecasting Algorithms - Table Builder #####
-### Last Update: 1/29/2025
+### Last Update: 2/6/2025
 
 # Load packages
 library(readxl)
@@ -13,6 +13,20 @@ library(feasts)
 library(ggplot2)
 library(pROC)
 library(tidyr)
+
+# Load in the raw asthma data
+asthma <- read_excel("C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/data-raw/asthma.xlsx") |>
+  tibble() |>
+  mutate(WEEK_NAME=wday(Day, label=TRUE, abbr=TRUE),
+         WEEK_NUMBER=epiweek(Day),
+         WeekDate=floor_date(Day, unit="week", week_start=7),
+         Quarter=quarter(Day, fiscal_start = 7, type="date_first")) |>
+  relocate(Quarter, .before=MONTH_NUMBER) |>
+  relocate(WEEK_NUMBER, .after=MONTH_NUMBER) |>
+  relocate(WEEK_NAME, .after=MONTH_NAME) |>
+  relocate(WeekDate, .after=MonthDate) |>
+  as_tibble()
+print(asthma, n=15)
 
 # Daily predictions - main analysis
 dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/Daily Predictions/"
@@ -30,7 +44,86 @@ asthma_postcovid <- readRDS(paste(dir, "postcovid_predict.rds", sep=""))
 asthma_postcovid
 
 
-# 1. Table Builder --------------------------------------------------------
+# 1. Count Table ----------------------------------------------------------
+
+yrs <- c("2016-2023","2016-2021","2016-2018","2020-2022",
+         "2016","2017","2018","2019","2020","2021","2022","2023")
+i <- 1
+n.max <- 6
+while(i<=length(yrs)){
+  if(i==1){
+    # Filter based on time period
+    asthma.yrs <- asthma |> filter(year(Day)>="2016" & year(Day)<="2023")
+  } else if(i==2){
+    asthma.yrs <- asthma |> filter(year(Day)>="2016" & year(Day)<="2021")
+  } else if(i==3){
+    asthma.yrs <- asthma |> filter(year(Day)>="2016" & year(Day)<="2018")
+  } else if(i==4){
+    asthma.yrs <- asthma |> filter(year(Day)>="2020" & year(Day)<="2022")
+  } else{
+    asthma.yrs <- asthma |> filter(year(Day)==yrs[i])
+  }
+  
+  # Count number of days in each period
+  length.days <-  asthma.yrs |>
+    count() |>
+    pull()
+  
+  # Count total number of cases in each period
+  total.cases <- asthma.yrs |>
+    ungroup() |>
+    summarise(Total=sum(AllAdmissions)) |>
+    pull()
+  
+  # Count number of days with N cases
+  cases <- rep(NA, n.max+2)
+  n <- 1
+  while(n<=n.max+2){
+    if(n<n.max+1){
+      
+      # Days where exactly N cases were observed
+      cases[n] <- asthma.yrs |>
+        filter(AllAdmissions==n-1)|>
+        count()|>
+        pull()
+      
+    } else{
+      
+      # Days where at least N or more cases were observed
+      cases[n] <- asthma.yrs |>
+        filter(AllAdmissions>=n-1)|>
+        count()|>
+        pull()
+      
+    }
+    
+    # Go to next n
+    n <- n+1
+  }
+  
+  # Count total number of cases
+  
+  # Save results to a table
+  if(i==1){
+    asthma.tbl <- data.frame(Period=yrs[i], Length=length.days, Total=total.cases,
+                             Zero=cases[1], One=cases[2], Two=cases[3], Three=cases[4],
+                             Four=cases[5], Five=cases[6], Six=cases[7], More=cases[8])
+  } else{
+    asthma.tbl <- bind_rows(asthma.tbl,
+                            data.frame(Period=yrs[i], Length=length.days, Total=total.cases,
+                                       Zero=cases[1], One=cases[2], Two=cases[3], Three=cases[4],
+                                       Four=cases[5], Five=cases[6], Six=cases[7], More=cases[8]) )
+  }
+  
+  # Go to next period
+  i <- i+1
+}
+
+# Print table
+asthma.tbl
+
+
+# 2. Table Builder --------------------------------------------------------
 
 # Calculate absolute percentage error stats, coverage, and the ROC curve analysis
 yrs <- c("2016-2021","2016-2018","2020-2022")
@@ -60,7 +153,7 @@ while(i<=length(yrs)){
     summarise(Min=min(PctError), Q1=quantile(PctError, p=0.25, names=F), Median=median(PctError),
               Q3=quantile(PctError, p=0.75, names=F), Max=max(PctError), IQR=Q3-Q1, Mean=mean(PctError)) |>
     mutate(Train=yrs[i], Valid=vld[i]) |>
-    select(Method, Train, Valid, Min, Q1, Median, Q3, Max, IQR)
+    select(Method, Train, Valid, Mean, Median, IQR)
   
   # Coverage
   asthma.cover <- asthma_yrs |>
@@ -223,7 +316,7 @@ while(i<=length(yrs)){
   i <- i+1
 }
 
-# 2. Table Results --------------------------------------------------------
+# 3. Table Results --------------------------------------------------------
 
 # Absolute percentage error
 print(asthma_pcterror |> arrange(Method), n=12)
@@ -249,8 +342,13 @@ asthma_ROC |>
   mutate(Method=factor(Method, levels=c("ARIMA","ETS","Prophet","Ensemble"))) |>
   arrange(Method)
 
+#####
 
-# 3. Thresholds -----------------------------------------------------------
+# Save results
+dir <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Predictions/"
+saveRDS(asthma_ROC, file = paste(dir, "ROC_table.RDS", sep=""))
+
+# 4. Thresholds -----------------------------------------------------------
 
 # Calculate thresholds
 yrs <- c("2016-2021","2016-2018","2020-2022")

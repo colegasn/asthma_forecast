@@ -1,5 +1,5 @@
 ##### Asthma Forecasting Algorithms - Daily Admissions #####
-### Last Update: 1/28/2025
+### Last Update: 2/6/2025
 
 # Load packages
 library(readxl)
@@ -80,7 +80,7 @@ asthma_ts |>
 
 # Plot the time series for all admissions
 asthma_ts |>
-  autoplot(y, color="#00b5d1", lwd=0.8)+
+  autoplot(y, color="#00b5d1", lwd=0.1)+
   theme_bw()+
   scale_x_date(date_breaks = "1 year", date_labels = "%Y")+
   theme(axis.title.x=element_text(color="black", size=14, margin=margin(t=10)),
@@ -96,6 +96,7 @@ asthma_ts |>
           subtitle="Jan 1, 2016 - December 31, 2023")
 
 # Calendar heat map
+med_AllAdmissions <- median(asthma$AllAdmissions)
 cal <- asthma |>
   group_by(MonthDate) |>
   mutate(WEEK_MONTH=(5+day(Day) + wday(floor_date(Day, 'month'))) %/% 7,
@@ -105,12 +106,12 @@ cal <- asthma |>
                                     "April","May","June","July",
                                     "August","September","October",
                                     "November","December"))) |>
-  #filter(year(Day)<2022) |>
   ggplot(aes(x=WEEK_NAME, y=WEEK_MONTH, fill=AllAdmissions))+
   geom_tile(color="black")+
   facet_grid(year(Day) ~ MONTH_NAME)+
   scale_y_reverse()+
-  scale_fill_gradient(low="white", high="blue", na.value="black")+
+  scale_fill_gradient2(low="blue", mid="white", high="red", na.value="black",
+                       midpoint = med_AllAdmissions, transform = "sqrt")+
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.border = element_rect(fill = "transparent", color="black", linewidth = 0.7),
@@ -126,8 +127,13 @@ cal <- asthma |>
         legend.position = "none")+
   xlab("")+ylab("")+
   ggtitle("Daily Asthma Hospitalizations")+
-  labs(fill="Admissions")
+  labs(fill="Trend")
 cal
+
+# Save the plot
+savepath <- "C:/Users/wiinu/OneDrive - cchmc/Documents/AHLS/Plots/"
+ggsave(plot_predict, filename=paste(savepath, "calendar_plot.pdf", sep=""), device=cairo_pdf,
+       width=14, height=8, units="in")
 
 
 # 1. ARIMA ----------------------------------------------------------------
